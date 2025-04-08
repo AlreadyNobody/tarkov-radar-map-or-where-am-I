@@ -3,13 +3,15 @@ import sys
 import os
 import time
 import json
+import threading
+
 
 # Функция для установки пакета через pip
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 
-# Пытаемся импортировать необходимые модули; если не удаётся – устанавливаем их
+# Импорт необходимых модулей; если не установлены – установить их.
 try:
     import pyautogui
 except ImportError:
@@ -31,6 +33,22 @@ except ImportError:
     install("keyboard")
     import keyboard
 
+try:
+    import psutil
+except ImportError:
+    print("psutil не найден, устанавливаю...")
+    install("psutil")
+    import psutil
+
+try:
+    import win32gui
+    import win32process
+except ImportError:
+    print("pywin32 не найден, устанавливаю...")
+    install("pywin32")
+    import win32gui
+    import win32process
+
 # Устанавливаем браузеры для Playwright
 print("Устанавливаю браузеры для Playwright...")
 subprocess.check_call([sys.executable, "-m", "playwright", "install"])
@@ -39,13 +57,13 @@ CONFIG_FILE = "config.json"
 new_map_flag = False  # Глобальный флаг для выбора новой карты
 
 
-# Функция для отладки: выводит имя каждой нажатой клавиши (при необходимости)
+# Функция для отладки: выводит имя каждой нажатой клавиши (если необходимо)
 def debug_key(event):
     print("DEBUG: Нажата клавиша:", event.name)
 
-# Если нужно отладить, можно раскомментировать следующую строку:
-# keyboard.hook(debug_key)
 
+# Для отладки можно раскомментировать:
+# keyboard.hook(debug_key)
 
 def load_config():
     """Загружает конфигурацию из файла, если он существует."""
@@ -114,15 +132,15 @@ def choose_map():
     """
     maps = [
         {"name": "ground-zero", "desc": "эпицентр"},
-        {"name": "woods",       "desc": "лес"},
-        {"name": "factory",     "desc": "завод"},
-        {"name": "customs",     "desc": "таможня"},
+        {"name": "woods", "desc": "лес"},
+        {"name": "factory", "desc": "завод"},
+        {"name": "customs", "desc": "таможня"},
         {"name": "interchange", "desc": "развязка"},
-        {"name": "shoreline",   "desc": "берег"},
-        {"name": "reserve",     "desc": "резерв"},
-        {"name": "lighthouse",  "desc": "маяк"},
-        {"name": "streets",     "desc": "улицы таркова"},
-        {"name": "lab",         "desc": "лаба"}
+        {"name": "shoreline", "desc": "берег"},
+        {"name": "reserve", "desc": "резерв"},
+        {"name": "lighthouse", "desc": "маяк"},
+        {"name": "streets", "desc": "улицы таркова"},
+        {"name": "lab", "desc": "лаба"}
     ]
     print("\nВыберите карту (введите номер):")
     for idx, m in enumerate(maps):
@@ -153,6 +171,22 @@ def non_blocking_wait(total_seconds, interval=0.2):
     while elapsed < total_seconds:
         time.sleep(interval)
         elapsed += interval
+
+
+def is_tarkov_active():
+    """
+    Проверяет, является ли активное окно процессом EscapeFromTarkov.exe.
+    Возвращает True, если активное окно принадлежит процессу с именем "EscapeFromTarkov.exe" (без учета регистра).
+    """
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        proc = psutil.Process(pid)
+        # Сравнение имени процесса без учета регистра
+        return proc.name().lower() == "escapefromtarkov.exe"
+    except Exception as e:
+        print("Ошибка при определении активного окна:", e)
+        return False
 
 
 def main():
@@ -194,7 +228,7 @@ def main():
 
         try:
             while True:
-                # Если флаг выбранной новой карты установлен, переходим к выбору новой карты
+                # Если флаг выбора новой карты установлен, выполняем выбор карты
                 if new_map_flag:
                     new_map_flag = False
                     print("Горячая клавиша F2 сработала – выбор новой карты")
@@ -209,9 +243,12 @@ def main():
                     print("Первичный клик выполнен для новой карты\n")
                     non_blocking_wait(2)
 
-                # Имитация нажатия клавиши для создания скриншота
-                pyautogui.press(screenshot_key)
-                print(f"Нажата клавиша {screenshot_key.upper()} на ПК")
+                # Проверка активного окна: нажимаем клавишу для создания скриншота только если активен EscapeFromTarkov.exe
+                if is_tarkov_active():
+                    pyautogui.press(screenshot_key)
+                    print(f"Нажата клавиша {screenshot_key.upper()} на ПК (окно Tarkov активно)")
+                else:
+                    print("Окно Tarkov не активно, клавиша не нажата")
 
                 non_blocking_wait(1)
 
@@ -230,8 +267,7 @@ def main():
                     """
                     page.evaluate(js_code)
                     print(f"Обнаружен новый файл: {new_file} и его имя вставлено с триггерами")
-
-                    # Удаляем файл после вставки
+                    # После успешной вставки удаляем файл
                     file_path = os.path.join(documents_path, new_file)
                     try:
                         os.remove(file_path)
